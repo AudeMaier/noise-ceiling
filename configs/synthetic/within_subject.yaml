@@ -1,0 +1,22 @@
+# Figure 2, synthetic panel.
+name: within_subject
+model:
+  X: 10
+  Y: 10
+  K: 1000
+  crop: [100, 100]
+  T: 100
+  n: 12
+  shared_fraction: 0.4
+  width: 1.0
+  sigma: 0.3
+  sigma_origin: 1.0
+  within_subject: true
+  gaussian_signals: true
+sweep:
+  n_iter: 10          # dataset regenerations, sets the confidence intervals
+  n_rep: 5            # trial subsets per n
+  realized: true      # weight moments from the realised trials
+estimators:
+  run_loop: false
+  chunked: false

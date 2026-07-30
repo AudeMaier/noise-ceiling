@@ -1,0 +1,22 @@
+# Figure 3, IT panel.
+name: cognitive_areas
+model:
+  X: 10
+  Y: 10
+  K: 1000
+  crop: [100, 100]
+  T: 2000
+  n: 16
+  shared_fraction: 0.2
+  width: 1.0
+  sigma: 0.35
+  sigma_origin: 3.0
+  within_subject: false
+  gaussian_signals: false
+sweep:
+  n_iter: 10
+  n_rep: 5
+  realized: true
+estimators:
+  run_loop: false
+  chunked: true

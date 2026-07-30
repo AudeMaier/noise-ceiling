@@ -1,0 +1,23 @@
+# Finite-T bias.
+name: finite_T
+model:
+  X: 10
+  Y: 10
+  K: 1000
+  crop: [100, 100]
+  T: 20000
+  n: 16
+  shared_fraction: 0.4
+  width: 2
+  sigma: 0.2
+  sigma_origin: 0.5
+  within_subject: false
+  gaussian_signals: false
+sweep:
+  n_outer: 50         # dataset regenerations
+  n_rep: 100          # random windows per T
+  realized: true
+  T_min: 10
+  T_max: 1000
+  n_T: 10
+  n_T_fitted: 6       # smallest T values used to fit the exponent

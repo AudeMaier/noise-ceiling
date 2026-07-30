@@ -20,14 +20,27 @@ Only the LOOP estimator needs a GPU. Everything else runs on CPU.
 
 ## Data
 The three datasets are:
-- Sherlock: (Chen et al., 2017)
+- Sherlock: (Chen et al., 2016)
 - THINGS fMRI1 (Hebart et al., 2023)
 - THINGS EEG2 (Gifford et al., 2022)
 
-Every dataset is an array of shape `(n_trials, n_units, n_samples)`. Trials are
-separate subjects for Sherlock and repeated presentations for THINGS fMRI1 and
-THINGS EEG2. The last axis is the one correlations are computed across: time
-points for the continuous Sherlock stimulus, stimuli for the other two.
+They are not included in the repository. Download and unpack it with:
+ 
+```bash
+python scripts/download_data.py --view-only 6a9a67ebc6aa4426a48321c880fa41be
+```
+ 
+The data is hosted on OSF and can also be browsed and downloaded by hand at
+<https://osf.io/2btpr/?view_only=6a9a67ebc6aa4426a48321c880fa41be>, unpacking
+the archives into `data/`.
+ 
+This lays the files out as the loaders expect:
+ 
+```
+data/sherlock/sherlock_{V1,A1,IT,Amygdala,Hippocampus}.npy
+data/THINGS_fMRI1_V1.npy
+data/THINGS_EEG2.npy
+```
 
 ## Running
 

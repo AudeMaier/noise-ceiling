@@ -116,9 +116,3 @@ Estimators are referred to by short keys throughout: `SH`, `SHSB`, `SNR`,
 `LOOC`, `TTMC`, `LOOP`, and `NC_mean` / `NC_single` for the two true ceilings,
 which are only available on synthetic data. Result files written before this
 naming used long names; `noise_ceiling.io.load_results` converts them.
-
-## Tests
-
-```bash
-pytest
-```

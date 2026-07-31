@@ -19,6 +19,7 @@ from noise_ceiling.plotting import plot_empirical, plot_synthetic_vs_empirical
 
 MEAN_ESTIMATORS = ["NC_mean", "SH", "SHSB", "SNR"]
 SINGLE_ESTIMATORS = ["NC_single", "LOOC", "TTMC"]
+SINGLE_ESTIMATORS_SHERLOCK = ["NC_single", "LOOC", "TTMC", "LOOP"]
 
 N_SYNTHETIC = 10      # dataset regenerations behind the synthetic error bars
 N_EMPIRICAL = 10      # subsets behind the recorded error bars
@@ -59,7 +60,7 @@ def main():
     for roi in ROIS:
         results = load_results(f"results/sherlock_results_{roi}.npy")
         fig = plot_empirical(results, ROI_TRIALS, MEAN_ESTIMATORS,
-                             SINGLE_ESTIMATORS, n_empirical=N_EMPIRICAL, title=roi)
+                             SINGLE_ESTIMATORS_SHERLOCK, n_empirical=N_EMPIRICAL, title=roi)
         save(fig, f"figures/figure_4_{roi}.svg")
 
     results = load_results("results/eeg_results.npy")

@@ -68,7 +68,7 @@ def plot_synthetic_vs_empirical(synthetic, theory, empirical, n_list, estimators
 def plot_empirical(results, n_list, mean_estimators, single_estimators,
                    n_empirical=50, ylim=(0, 0.9), title=None,
                    xlabel="Number of trials (n)", ylabel="Noise Ceiling Value",
-                   legend=False):
+                   legend=True):
     """Mean and single-trial estimators of one recorded dataset, side by side."""
     fig, (ax_mean, ax_single) = plt.subplots(1, 2, figsize=(5, 3))
 

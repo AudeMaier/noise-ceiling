@@ -48,11 +48,12 @@ data/THINGS_EEG2.npy
 python experiments/run_synthetic.py                  # all three synthetic regimes
 python experiments/run_synthetic.py configs/synthetic/within_subject.yaml
 python experiments/run_T_convergence.py              # finite-T bias on synthetic data
-python experiments/run_T_convergence_sherlock.py # finite-T bias on sherlock
+python experiments/run_T_convergence_sherlock.py     # finite-T bias on sherlock
 python experiments/run_empirical.py sherlock         # all five ROIs
 python experiments/run_empirical.py things
 python experiments/run_empirical.py eeg
 python experiments/make_figures.py                   # paper figures
+python experiments/retention_curve_aic.py            # validation of AIC selection
 ```
 
 Useful flags for `run_empirical.py`:
@@ -73,6 +74,7 @@ Which figure comes from which command:
 | 4 | `run_empirical.py sherlock` |
 | finite-T synthetic | `run_T_convergence.py` |
 | finite-T Sherlock | `run_T_convergence_sherlock.py` |
+| AIC retention curves | `retention_curve_aic.py` |
 
 `run_T_convergence.py` caches its simulations in
 `data/finite_T_bias/finite_T_bias_tmax.pkl` and reuses them on the next run;

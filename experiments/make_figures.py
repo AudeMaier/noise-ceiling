@@ -9,6 +9,7 @@ EEG: THINGS_EEG2 on its own.
 """
 
 from __future__ import annotations
+import argparse
 
 import matplotlib
 
@@ -22,7 +23,7 @@ SINGLE_ESTIMATORS = ["NC_single", "LOOC", "TTMC"]
 SINGLE_ESTIMATORS_SHERLOCK = ["NC_single", "LOOC", "TTMC", "LOOP"]
 
 N_SYNTHETIC = 10      # dataset regenerations behind the synthetic error bars
-N_EMPIRICAL = 10      # subsets behind the recorded error bars
+N_EMPIRICAL = 50      # subsets behind the recorded error bars
 
 # (figure name, synthetic regime, recorded results, trial counts)
 COMPARISONS = [
@@ -45,7 +46,7 @@ def save(fig, path):
     print(f"wrote {path}")
 
 
-def main():
+def main(loop=False):
     for figure, regime, empirical_path, n_list in COMPARISONS:
         synthetic = load_pickle(f"results/synthetic_results_{regime}.pkl")
         empirical = load_results(empirical_path)
@@ -54,7 +55,7 @@ def main():
                                    ("single", SINGLE_ESTIMATORS)):
             fig = plot_synthetic_vs_empirical(
                 synthetic["empirical"], synthetic["theory"], empirical, n_list,
-                estimators, n_synthetic=N_SYNTHETIC, n_empirical=N_EMPIRICAL)
+                estimators, n_synthetic=N_SYNTHETIC, n_empirical=N_EMPIRICAL, loop=loop if suffix == "single" else False,)
             save(fig, f"figures/{figure}_{suffix}.svg")
 
     for roi in ROIS:
@@ -70,4 +71,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--loop", action="store_true",
+                        help="include LOOP in the single-trial panel")
+    args = parser.parse_args()
+    main(args.loop)

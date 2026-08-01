@@ -66,7 +66,7 @@ DATASETS = {
         "chunked": False,
         "aic": None,
         "aic_cache": None,
-        "n_bootstraps": 10,
+        "n_bootstraps": 50,
         "results": "results/eeg_results.npy",
     },
 }

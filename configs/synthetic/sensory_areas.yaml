@@ -1,4 +1,5 @@
-# Figure 3, V1 panel.
+# Figure 3, V1 panel. sigma solved to reproduce theta = 0.117 measured on
+# Sherlock V1.
 name: sensory_areas
 model:
   X: 10
@@ -7,10 +8,10 @@ model:
   crop: [100, 100]
   T: 2000
   n: 16
-  shared_fraction: 0.4
+  shared_fraction: 0.6
   width: 2.0
   sigma: 0.2
-  sigma_origin: 2
+  sigma_origin: 4.0
   within_subject: false
   gaussian_signals: false
 sweep:
@@ -18,5 +19,5 @@ sweep:
   n_rep: 5
   realized: true
 estimators:
-  run_loop: false
+  run_loop: true
   chunked: true

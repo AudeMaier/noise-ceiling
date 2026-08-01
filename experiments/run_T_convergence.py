@@ -6,9 +6,6 @@ level; that offset would otherwise dominate the measured bias beyond a few
 hundred samples and invert its sign. Anchoring cancels any constant offset and
 tests the claim under review, that the bias decays as 1/T.
 
-Since measured(T) = c (T^-p - T_ref^-p), the exponent is estimated with
-fit_power rather than a log-log slope, which would be biased steep.
-
     python experiments/run_T_convergence.py
 """
 

@@ -43,7 +43,7 @@ DATASETS = {
         "clean": {"tr": 1.5, "cutoff_s": 140.0, "run_lengths": [946, 1030]},
         # neighbouring time points are correlated, so test chunks must be purged
         "chunked": True,
-        "aic": {"threshold": 2, "n_bootstrap": 50, "n_samples": 100},
+        "aic": {"threshold": 6, "n_bootstrap": 50, "n_samples": 100},
         "aic_cache": "results/AIC_dist/aic_dist_sherlock_{roi}.npy",
         "n_bootstraps": 10,
         "results": "results/sherlock_results_{roi}.npy",

@@ -1,0 +1,37 @@
+name: within_subject
+model:
+  X: 10
+  Y: 10
+  K: 1000
+  crop: [100, 100]
+  T: 1976
+  n: 12
+  shared_fraction: 0.35
+  width: 1.0
+  sigma: 0.6
+  sigma_origin: 1.0
+  within_subject: true
+  gaussian_signals: false      
+violations:
+  hrf_subject_sd: 0.0
+  hrf_voxel_sd: 0.75
+  hrf_voxel_smooth: 1.5
+  hrf_dispersion_ratio: 0.5
+  oscillation_amplitude: 0.5
+  oscillation_freq_hz: 0.001
+  oscillation_phase_jitter: 0.8
+  highpass_cutoff_s: 140
+  shared_individual_corr: 0
+  sigma_trial_sd: 0.3
+real_noise:
+  dataset: sherlock
+  roi: IT
+  scaling: global
+  clean_kwargs:
+    standardize: false
+sweep:
+  n_iter: 10
+  n_rep: 5
+estimators:
+  run_loop: false
+  chunked: true

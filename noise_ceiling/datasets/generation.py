@@ -1,10 +1,3 @@
-"""Generative model for the synthetic data.
-
-A set of K latent sources is drawn, some shared across trials and some specific
-to each trial. Every unit of a 2-D grid mixes the sources with Gaussian weights
-centred on the source positions, and Gaussian noise is added on top.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -13,22 +6,14 @@ from scipy.stats import gamma
 from tqdm import tqdm
 
 
-def generate_signals(num_signals, T, lambda_=0.1, mu=5.0, tr=1.5,
-                     a1=6, a2=16, b1=1, b2=1, c=1.6, crop=None):
-    """Block-design sources convolved with a double-gamma HRF.
+def generate_neural(num_signals, T_total, lambda_=0.1, mu=5.0):
+    """Block-design neural sources, before any hemodynamic convolution.
 
     Events arrive as a Poisson process with rate `lambda_` and last for an
     exponentially distributed duration with mean `mu`.
 
-    crop : (pad_start, pad_end) samples generated then discarded, so that the
-           returned signals are free of convolution edge effects.
-
-    Returns (num_signals, T) mean-centred signals.
+    Returns (num_signals, T_total), not mean-centred.
     """
-    pad_start = crop[0] if crop is not None else 0
-    pad_end = crop[1] if crop is not None else 0
-    T_total = T + pad_start + pad_end
-
     spikes = np.random.poisson(lambda_, (num_signals, T_total))
     underlying = np.zeros((num_signals, T_total + 1))
 
@@ -40,8 +25,40 @@ def generate_signals(num_signals, T, lambda_=0.1, mu=5.0, tr=1.5,
         np.add.at(underlying, (rows, end_indices), -spikes[rows, cols])
         underlying = np.cumsum(underlying, axis=1)[:, :T_total]
 
-    t_hrf = np.arange(0, 30, tr)
-    hrf = gamma.pdf(t_hrf, a=a1, scale=b1) - gamma.pdf(t_hrf, a=a2, scale=b2) / c
+    return underlying[:, :T_total]
+
+
+def hrf_kernel(tr=1.5, a1=6, a2=16, b1=1, b2=1, c=1.6, duration=30.0,
+               normalize=False):
+    """Double-gamma HRF sampled at `tr`.
+
+    normalize=True rescales the kernel to unit L2 norm, so that changing its
+    shape changes the timing and dispersion of the response without changing
+    the variance it imparts. Used by the heterogeneous-HRF violation, where a
+    shape-dependent gain would confound HRF variability with SNR.
+    """
+    t_hrf = np.arange(0, duration, tr)
+    kernel = gamma.pdf(t_hrf, a=a1, scale=b1) - gamma.pdf(t_hrf, a=a2, scale=b2) / c
+    if normalize:
+        kernel = kernel / np.sqrt(np.sum(kernel ** 2))
+    return kernel
+
+
+def generate_signals(num_signals, T, lambda_=0.1, mu=5.0, tr=1.5,
+                     a1=6, a2=16, b1=1, b2=1, c=1.6, crop=None):
+    """Block-design sources convolved with a double-gamma HRF.
+
+    crop : (pad_start, pad_end) samples generated then discarded, so that the
+           returned signals are free of convolution edge effects.
+
+    Returns (num_signals, T) mean-centred signals.
+    """
+    pad_start = crop[0] if crop is not None else 0
+    pad_end = crop[1] if crop is not None else 0
+    T_total = T + pad_start + pad_end
+
+    underlying = generate_neural(num_signals, T_total, lambda_=lambda_, mu=mu)
+    hrf = hrf_kernel(tr=tr, a1=a1, a2=a2, b1=b1, b2=b2, c=c)
     bold = fftconvolve(underlying, hrf[np.newaxis, :], mode="full", axes=1)[:, :T_total]
 
     if crop is not None:

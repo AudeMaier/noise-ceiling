@@ -16,7 +16,7 @@ model:
 sweep:
   n_iter: 10
   n_rep: 5
-  realized: true
+  realized: false
 estimators:
   run_loop: true
   chunked: true

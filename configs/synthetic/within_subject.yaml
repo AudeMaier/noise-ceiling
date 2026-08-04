@@ -1,4 +1,4 @@
-# Figure 2, synthetic panel.
+# Figure 2, synthetic panel
 name: within_subject
 model:
   X: 10
@@ -16,7 +16,7 @@ model:
 sweep:
   n_iter: 10          # dataset regenerations, sets the confidence intervals
   n_rep: 5            # trial subsets per n
-  realized: true      # weight moments from the realised trials
+  realized: false
 estimators:
   run_loop: false
   chunked: false

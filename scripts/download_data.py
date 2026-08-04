@@ -1,14 +1,8 @@
 """Download the data archives from OSF and unpack them into data/.
 
-    python scripts/download_data.py
-    python scripts/download_data.py --view-only TOKEN     # while the project is private
-    python scripts/download_data.py --only sherlock.zip
-
 Every archive is checked against data_checksums.txt before it is unpacked.
 Archives already present and matching their checksum are skipped, so the script
 is safe to re-run after an interrupted download.
-
-Uses only the standard library.
 """
 
 from __future__ import annotations

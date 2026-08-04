@@ -1,5 +1,4 @@
-# Figure 3, V1 panel. sigma solved to reproduce theta = 0.117 measured on
-# Sherlock V1.
+# Figure 3, V1 panel
 name: sensory_areas
 model:
   X: 10
@@ -17,7 +16,7 @@ model:
 sweep:
   n_iter: 10
   n_rep: 5
-  realized: true
+  realized: false
 estimators:
   run_loop: true
   chunked: true

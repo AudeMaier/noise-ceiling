@@ -45,15 +45,17 @@ data/THINGS_EEG2.npy
 ## Running
 
 ```bash
-python experiments/run_synthetic.py                  # all three synthetic regimes
+python experiments/run_synthetic.py  # all three synthetic regimes
 python experiments/run_synthetic.py configs/synthetic/within_subject.yaml
-python experiments/run_T_convergence.py              # finite-T bias on synthetic data
-python experiments/run_T_convergence_sherlock.py     # finite-T bias on sherlock
-python experiments/run_empirical.py sherlock         # all five ROIs
+python experiments/run_T_convergence.py  # finite-T bias on synthetic data
+python experiments/run_T_convergence_sherlock.py  # finite-T bias on sherlock
+python experiments/run_empirical.py sherlock  # all five ROIs
 python experiments/run_empirical.py things
 python experiments/run_empirical.py eeg
-python experiments/make_figures.py                   # paper figures
-python experiments/retention_curve_aic.py            # validation of AIC selection
+python experiments/make_figures.py  # paper figures
+python experiments/retention_curve_aic.py  # validation of AIC selection
+python experiments/run_violations.py configs/violations/within_subject.yaml  # synthetic data with assumption violation
+
 ```
 
 Useful flags for `run_empirical.py`:

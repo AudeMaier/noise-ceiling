@@ -10,11 +10,9 @@ matching the machines the results were produced on:
 ```bash
 pip install -r requirements-py38-gpu.txt   # GPU runs, Python 3.8.13, CUDA 12.1
 pip install -r requirements-py312.txt      # CPU runs, Python 3.12.3
-pip install -e .                           # makes `import noise_ceiling` work
+pip install -e .
 ```
 
-`pip install -e .` is what lets the scripts in `experiments/` find the package;
-without it, run them with `PYTHONPATH=.`.
 
 Only the LOOP estimator needs a GPU. Everything else runs on CPU.
 
@@ -64,8 +62,7 @@ Useful flags for `run_empirical.py`:
 - `--loop` also computes the LOOP estimator. Off by default: it is much slower
   than the others and needs a GPU to be practical.
 - `--recompute-aic` redoes the unit selection instead of reusing the cached
-  Delta AIC distribution in `results/AIC_dist/`. The procedure is stochastic, so
-  recomputing generally selects a slightly different set of units.
+  Delta AIC distribution in `results/AIC_dist/`.
 
 Which figure comes from which command:
 

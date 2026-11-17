@@ -6,7 +6,8 @@ THINGS-EEG. The last axis is the one correlations are computed across: time
 points for the continuous Sherlock stimulus, stimuli for the other two.
 
 DATASETS holds everything that differs between them, so that the differences are
-visible in one place instead of being spread over the run scripts.
+visible in one place instead of being spread over the run scripts: paths, the
+arguments of `preprocessing.clean`, and whether LOOP is run.
 """
 
 from __future__ import annotations
@@ -39,33 +40,27 @@ DATASETS = {
     "sherlock": {
         "loader": load_sherlock,
         "rois": ["V1", "A1", "IT", "amygdala", "hippocampus"],
-        # 1976 time points, two runs; the split removes the boundary step
+        # 1976 time points, two runs, cleaned separately; LOOP holds out each run
         "clean": {"tr": 1.5, "cutoff_s": 140.0, "run_lengths": [946, 1030]},
-        # neighbouring time points are correlated, so test chunks must be purged
-        "chunked": True,
-        "aic": {"threshold": 6, "n_bootstrap": 50, "n_samples": 100},
-        "aic_cache": "results/AIC_dist/aic_dist_sherlock_{roi}.npy",
-        "n_bootstraps": 10,
+        "loop": True,
+        "n_bootstraps": 50,
         "results": "results/sherlock_results_{roi}.npy",
     },
     "things": {
         "loader": load_things,
         "rois": None,
-        "clean": {"tr": 1.5, "cutoff_s": 140.0, "run_lengths": None},
-        # the last axis indexes unrelated stimuli, so a random split is enough
-        "chunked": False,
-        "aic": {"threshold": 2, "n_bootstrap": 50, "n_samples": 100},
-        "aic_cache": "results/AIC_dist/aic_dist_THINGS.npy",
-        "n_bootstraps": 10,
+        # the last axis indexes stimuli, which show no autocorrelation: each
+        # series is only centred and z-scored. Too few stimuli for a LOOP test set.
+        "clean": {"cutoff_s": None},
+        "loop": False,
+        "n_bootstraps": 50,
         "results": "results/THINGS_results.npy",
     },
     "eeg": {
         "loader": load_eeg,
         "rois": None,
-        "clean": {"tr": 1.5, "cutoff_s": 140.0, "run_lengths": None},
-        "chunked": False,
-        "aic": None,
-        "aic_cache": None,
+        "clean": {"cutoff_s": None},
+        "loop": False,
         "n_bootstraps": 50,
         "results": "results/eeg_results.npy",
     },

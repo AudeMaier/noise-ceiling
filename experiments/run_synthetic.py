@@ -19,6 +19,7 @@ from tqdm import tqdm
 matplotlib.use("Agg")
 
 from noise_ceiling.config import load_config
+from noise_ceiling.datasets.empirical import trial_grid
 from noise_ceiling.datasets.synthetic import (ALL_ESTIMATORS, MEAN_ESTIMATORS,
                                               SINGLE_ESTIMATORS, SyntheticDataset)
 from noise_ceiling.io import ensure_dir, save_pickle
@@ -32,17 +33,15 @@ def run(config_path):
     config = load_config(config_path)
     name, params, sweep = config["name"], config["model"], config["sweep"]
     run_loop = config["estimators"]["run_loop"]
-    keys = ALL_ESTIMATORS + (("LOOP",) if run_loop else ())
-
-    n_values = list(range(2, params["n"] + 1, 2))
+    keys = ALL_ESTIMATORS + (("LOOP", "LOOP_null") if run_loop else ())
+    n_values = trial_grid(params["n"])
     runs = []
     for _ in tqdm(range(sweep["n_iter"]), desc=name):
         dataset = SyntheticDataset(**params)
         runs.append(dataset.sweep_n(n_values, n_rep=sweep["n_rep"],
                                     match_theory_trial=True,
-                                    realized=sweep["realized"],
                                     run_loop=run_loop,
-                                    chunked=config["estimators"]["chunked"]))
+                                    run_lengths=config["estimators"].get("run_lengths")))
 
     empirical = {k: np.array([r["empirical"][k] for r in runs]) for k in keys}
     theory = {k: np.array([r["theory"][k] for r in runs]) for k in ALL_ESTIMATORS}
@@ -52,9 +51,11 @@ def run(config_path):
     fig = plot_theory_vs_empirical(
         empirical, theory, n_values, MEAN_ESTIMATORS, SINGLE_ESTIMATORS,
         n_repetitions=sweep["n_iter"],
-        title=f"{name}   (dashed = theory, solid = empirical, 95% CI)")
+        title=f"{name}   (dashed = theory, solid = empirical, 95% CI)", loop=run_loop)
     fig.savefig(figure_path)
 
+    # the null LOOP is a check of the split, shown on the diagnostic figure only
+    empirical.pop("LOOP_null", None)
     result_path = f"results/synthetic_results_{name}.pkl"
     save_pickle(result_path, {"n_list": n_values, "empirical": empirical,
                               "theory": theory, "params": params})

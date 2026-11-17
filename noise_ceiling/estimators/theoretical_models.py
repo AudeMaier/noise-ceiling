@@ -1,104 +1,110 @@
-"""Closed-form expectations of the noise ceiling estimators.
+"""Closed-form leading terms of the noise ceiling estimators.
 
 Each function mirrors one estimator in `estimators.empirical.estimators` and
-returns its expected value under the generative model, averaged over units.
+returns, for every unit, the leading term of its large-T expansion. Everything
+is conditional on the trials actually used: the weights are those of these
+trials, not population moments. The error is O_P(T^-1/2), or O_P(T^-1/4) for
+ATV and SHSB at units where the argument of their square root is near zero.
 
 Common arguments
 ----------------
-sigma_s2, mean_s : variance and mean of a single signal.
-sigma_2          : variance of the additive noise.
-M_s, mu_s        : sum over shared sources of E[w^2] and of E[w]^2.
-M_i, mu_i        : the same sums over the individual sources.
-E_s              : sum over shared sources of E[w] w_0, i.e. the overlap between
-                   a trial's weights and those of the held-out trial.
-n                : number of trials.
-W0               : weights of the held-out trial, (X, Y, K).
+W         : (n, ..., K) weights of the noise-free signal of every trial on
+            centred, orthonormal latent signals, so that the time covariance of
+            two noise-free signals is the dot product of their weights.
+noise_var : (n, ...) noise variance sigma_l^2 of every trial, averaged over time.
+index     : the trial held out by the single-trial estimators.
+splits    : list of index arrays A, each defining the split (A, [n] minus A).
 """
 
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import fftconvolve
-from scipy.special import gamma as gamma_fn
 
 
-def estimate_R_phi(phi, max_lag=None):
-    """Autocovariance of the signals `phi` (K, T), averaged over signals."""
-    _, T = phi.shape
-    if max_lag is None:
-        max_lag = T - 1
-    centered = phi - np.mean(phi, axis=1, keepdims=True)
-    full_corr = fftconvolve(centered, centered[:, ::-1], mode="full", axes=1)
-    return np.mean(full_corr[:, T - 1:] / T, axis=0)[:max_lag + 1]
+def signal_var(w):
+    """Var_t of a noise-free signal with weights w, sum_k w_k^2."""
+    return (w ** 2).sum(axis=-1)
 
 
-def compute_sigma_r2(M_i, M_s, sigma_s2, sigma_2, sigma_corr2, T):
-    """Bartlett variance factor of the sample correlation. Depends on T."""
-    weight_power = M_i + M_s
-    total_var = weight_power * sigma_s2 + sigma_2
-    return 1 + 2 * (weight_power * sigma_s2 / total_var) ** 2 * sigma_corr2
+def signal_cov(w_a, w_b):
+    """Cov_t of two noise-free signals with weights w_a and w_b."""
+    return (w_a * w_b).sum(axis=-1)
 
 
-def noise_ceiling_mean_th(sigma_s2, sigma_2, M_s, mu_s, M_i, n):
+def weight_var(W):
+    """sum_k Var_l[w_k], the variance of the weights across trials (1/n)."""
+    return W.var(axis=0).sum(axis=-1)
+
+
+def noise_ceiling_mean_th(W, noise_var):
     """NC^mean."""
-    return np.sqrt(sigma_s2 * (M_s + (n - 1) * mu_s)
-                   / (sigma_s2 * (M_s + (n - 1) * mu_s + M_i) + sigma_2)).mean()
+    n = W.shape[0]
+    signal = signal_var(W.mean(axis=0))
+    return np.sqrt(signal / (signal + noise_var.mean(axis=0) / n))
 
 
-def noise_ceiling_single_th(sigma_s2, sigma_2, W0, shared_number):
-    """NC^single."""
-    return np.sqrt(sigma_s2 * (W0[:, :, :shared_number] ** 2).sum(axis=-1)
-                   / (sigma_s2 * (W0 ** 2).sum(axis=-1) + sigma_2)).mean()
+def allen_noise_ceiling_th(W, noise_var):
+    """ATV. The variance of the weights across trials is counted as noise."""
+    n = W.shape[0]
+    signal = signal_var(W.mean(axis=0))
+    ratio = ((signal - weight_var(W) / (n - 1))
+             / (signal + noise_var.mean(axis=0) / n))
+    return np.sqrt(np.maximum(ratio, 0))
 
 
-def split_half_correlation_th(sigma_s2, sigma_2, M_s, mu_s, M_i, n):
-    """SH."""
-    return ((sigma_s2 * n / 2 * mu_s)
-            / (sigma_s2 * (M_s + (n / 2 - 1) * mu_s + M_i) + sigma_2)).mean()
+def _half_averages(W, noise_var, A):
+    """Cov_t of the two half averages of the split (A, [n] minus A), and their Var_t."""
+    in_A = np.zeros(W.shape[0], dtype=bool)
+    in_A[A] = True
+    w_A, w_B = W[in_A].mean(axis=0), W[~in_A].mean(axis=0)
+    var_A = signal_var(w_A) + noise_var[in_A].sum(axis=0) / in_A.sum() ** 2
+    var_B = signal_var(w_B) + noise_var[~in_A].sum(axis=0) / (~in_A).sum() ** 2
+    return signal_cov(w_A, w_B), var_A, var_B
 
 
-def spearman_brown_noise_ceiling_th(sigma_s2, sigma_2, sigma_r2, M_s, mu_s, M_i,
-                                    n, T, individual_coords):
-    """SHSB, with the rectification correction for units carrying no shared signal."""
-    if individual_coords.mean() == 0:
-        correction = 0
-    else:
-        correction = (individual_coords.mean()
-                      * ((sigma_r2 * individual_coords).mean()
-                         / individual_coords.mean() / (2 * T)) ** 0.25
-                      * 1 / np.sqrt(np.pi) * gamma_fn(0.75))
-    return np.sqrt((sigma_s2 * n * mu_s)
-                   / (sigma_s2 * (M_s + (n - 1) * mu_s + M_i) + sigma_2)).mean() + correction
+def split_half_correlation_th(W, noise_var, splits):
+    """SH: correlation of the two half averages, averaged over the splits."""
+    correlations = []
+    for A in splits:
+        cov, var_A, var_B = _half_averages(W, noise_var, A)
+        correlations.append(cov / np.sqrt(var_A * var_B))
+    return np.mean(correlations, axis=0)
 
 
-def leave_one_out_correlation_th(sigma_s2, sigma_2, W0, M_s, mu_s, M_i, E_s, n):
+def spearman_brown_noise_ceiling_th(W, noise_var, splits):
+    """SHSB: the Spearman-Brown correction is averaged over the splits before
+    the rectified square root.
+
+    For halves of equal size, 2 Cov / (Cov + sqrt(Var_A Var_B)) is
+    (sum_k wbar_k^2 - Delta^w_AB) / (sum_k wbar_k^2 + sigmabar^2 / n - Delta^sd_AB).
+    """
+    corrected = []
+    for A in splits:
+        cov, var_A, var_B = _half_averages(W, noise_var, A)
+        corrected.append(2 * cov / (cov + np.sqrt(var_A * var_B)))
+    return np.sqrt(np.maximum(np.mean(corrected, axis=0), 0))
+
+
+def noise_ceiling_single_th(W, noise_var, index=0):
+    """NC^single. Depends on trial `index` alone, not on n."""
+    signal = signal_var(W[index])
+    return np.sqrt(signal / (signal + noise_var[index]))
+
+
+def leave_one_out_correlation_th(W, noise_var, index=0):
     """LOOC."""
-    return ((sigma_s2 * E_s)
-            / np.sqrt((sigma_s2 * (M_s + (n - 2) * mu_s + M_i) + sigma_2) / (n - 1)
-                      * (sigma_s2 * (W0 ** 2).sum(axis=-1) + sigma_2))).mean()
+    others = np.delete(np.arange(W.shape[0]), index)
+    w_others = W[others].mean(axis=0)
+    var_one = signal_var(W[index]) + noise_var[index]
+    var_others = signal_var(w_others) + noise_var[others].mean(axis=0) / len(others)
+    return signal_cov(W[index], w_others) / np.sqrt(var_one * var_others)
 
 
-def mean_to_one_correlation_th(sigma_s2, sigma_2, W0, M_s, mu_s, M_i, E_s, n,
-                               shared_number):
-    """TTMC."""
-    return (((sigma_s2 * (W0 ** 2).sum(axis=-1) + sigma_2) / n
-             + sigma_s2 * E_s * (n - 1) / n)
-            / np.sqrt((sigma_s2 * (M_s + (n - 1) * mu_s + M_i) + sigma_2) / n
-                      * (sigma_s2 * (W0 ** 2).sum(axis=-1) + sigma_2))).mean()
-
-
-def allen_noise_ceiling_th(sigma_s2, mean_s, sigma_2, sigma_r2, M_s, mu_s, M_i,
-                           mu_i, n, T, individual_coords):
-    """SNR, with the rectification correction for units carrying no shared signal."""
-    if individual_coords.mean() == 0:
-        correction = 0
-    else:
-        correction = (individual_coords.mean()
-                      * ((sigma_r2 * individual_coords).mean()
-                         / individual_coords.mean() / T) ** 0.25
-                      * 1 / np.sqrt(2 * np.pi) * gamma_fn(0.75))
-    sigma_total = (sigma_s2 * (M_s + (n - 1) * mu_s + M_i) + sigma_2) / n
-    sigma_noise = ((mean_s ** 2 + sigma_s2) * (M_s - mu_s + M_i)
-                   - mean_s ** 2 * mu_i + sigma_2)
-    rectified = np.maximum(sigma_total - sigma_noise / n, np.zeros_like(sigma_total))
-    return np.sqrt(rectified * (1 - individual_coords) / sigma_total).mean() + correction
+def mean_to_one_correlation_th(W, noise_var, index=0):
+    """TTMC. Trial `index` is part of the mean, so its noise is shared."""
+    n = W.shape[0]
+    w_bar = W.mean(axis=0)
+    cov = signal_cov(W[index], w_bar) + noise_var[index] / n
+    var_one = signal_var(W[index]) + noise_var[index]
+    var_mean = signal_var(w_bar) + noise_var.mean(axis=0) / n
+    return cov / np.sqrt(var_one * var_mean)

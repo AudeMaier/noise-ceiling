@@ -10,7 +10,8 @@ from noise_ceiling.estimators.empirical.estimators import (allen_noise_ceiling,
                                                            mean_to_one_correlation,
                                                            pearson_corr,
                                                            split_half_correlation)
-from noise_ceiling.estimators.empirical.loop import make_split, purged_test_chunks
+from noise_ceiling.estimators.empirical.loop import (circular_shift, loop_estimate,
+                                                    run_folds)
 
 SMALL = dict(X=4, Y=4, K=40, T=400, n=6, crop=[20, 20], shared_fraction=0.4,
              sigma=0.3, width=1.0, sigma_origin=1.0, within_subject=False,
@@ -49,23 +50,37 @@ def test_projection_removes_a_linear_trend():
     assert project_out(trend, Q).var() / trend.var() < 1e-3
 
 
-def test_purged_split_keeps_a_buffer():
-    train, test = purged_test_chunks(2000, n_chunks=5, test_fraction=0.25,
-                                     buffer_size=50)
-    assert not set(train) & set(test)
-    assert min(abs(t - v) for t in train for v in [test[0]]) > 0
+def test_run_folds_cover_every_sample():
+    data = np.arange(2 * 3 * 100, dtype=float).reshape(2, 3, 100)
+    runs, segments = run_folds(data, run_lengths=[40, 60], n_segments=4)
+    assert [r.shape[-1] for r in runs] == [40, 60]
+    assert np.array_equal(np.concatenate(runs, -1), data)
+    assert np.array_equal(np.concatenate(segments[1], -1), runs[1])
 
 
-def test_random_split_covers_every_sample():
-    train, test = make_split(500, chunked=False, test_fraction=0.25)
-    assert sorted(np.concatenate([train, test])) == list(range(500))
+def _shared_signal_trials(rng, n=6, units=8, T=400, noise=1.0):
+    signal = rng.normal(size=(1, units, T))
+    return signal + noise * rng.normal(size=(n, units, T))
+
+
+def test_loop_recovers_a_shared_signal():
+    data = _shared_signal_trials(np.random.default_rng(0))
+    runs, segments = run_folds(data)
+    assert loop_estimate(runs, segments).mean() > 0.4
+
+
+def test_loop_is_null_on_shifted_trials():
+    rng = np.random.default_rng(1)
+    data = circular_shift(_shared_signal_trials(rng), rng=rng)
+    runs, segments = run_folds(data)
+    assert abs(loop_estimate(runs, segments).mean()) < 0.05
 
 
 def test_synthetic_estimates_are_finite_and_bounded():
     np.random.seed(0)
     dataset = SyntheticDataset(**SMALL)
     empirical = dataset.estimate(n=6, index=0)
-    theory = dataset.theory(6, realized=True)
+    theory = dataset.theory(6)
     for key in ALL_ESTIMATORS:
         assert np.isfinite(empirical[key]) and -1 <= empirical[key] <= 1.2
         assert np.isfinite(theory[key])
@@ -74,7 +89,30 @@ def test_synthetic_estimates_are_finite_and_bounded():
 def test_sweep_shapes():
     np.random.seed(0)
     dataset = SyntheticDataset(**SMALL)
-    result = dataset.sweep_n([2, 4, 6], n_rep=2, realized=True)
+    result = dataset.sweep_n([2, 4, 6], n_rep=2)
     for key in ALL_ESTIMATORS:
         assert result["empirical"][key].shape == (3,)
         assert result["theory"][key].shape == (3,)
+
+
+def test_ridge_score_is_the_pearson_correlation_of_the_prediction():
+    import torch
+    from noise_ceiling.estimators.empirical.ridge_GPU.ridge_regression import ridge_corr_torch
+
+    rng = np.random.default_rng(0)
+    X_train, X_test = rng.normal(size=(80, 10)), rng.normal(size=(30, 10))
+    weights = rng.normal(size=(10, 3))
+    y_train = X_train @ weights + rng.normal(size=(80, 3))
+    y_test = X_test @ weights + rng.normal(size=(30, 3))
+    alpha = 2.0
+
+    # ridge with penalty alpha^2, the convention of the SVD solver
+    beta = np.linalg.solve(X_train.T @ X_train + alpha ** 2 * np.eye(10), X_train.T @ y_train)
+    expected = pearson_corr((X_test @ beta).T, y_test.T)
+
+    def tensor(a):
+        return torch.tensor(a, dtype=torch.float64)
+
+    scores = ridge_corr_torch(tensor(X_train), tensor(X_test), tensor(y_train),
+                              tensor(y_test), [alpha]).numpy()[0]
+    assert np.allclose(scores, expected, atol=1e-6)

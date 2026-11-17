@@ -33,26 +33,35 @@ def true_noise_ceiling_single(data, noiseless_data, index=0):
     return pearson_corr(noiseless_data[index], data[index])
 
 
-def split_half_correlation(data, correction=False, n_splits=10):
-    """SH: correlation between the means of two random halves of the trials.
+def random_half_splits(n_trials, n_splits=10):
+    """Random splits of the trials, each given by the indices of its first half."""
+    return [np.random.permutation(n_trials)[:n_trials // 2] for _ in range(n_splits)]
 
-    correction=True applies the Spearman-Brown correction (SHSB), after
-    clipping negative correlations to zero.
+
+def split_half_correlation(data, correction=False, n_splits=10, splits=None):
+    """SH: correlation between the means of two halves of the trials, averaged
+    over splits.
+
+    correction=True gives SHSB: the Spearman-Brown correction 2r / (1 + r) is
+    applied to every split, averaged, then rectified and square-rooted.
+    splits : indices of the first half of every split, as returned by
+             `random_half_splits`. Drawn at random if None.
     """
-    data = data.copy()
-    correlation_maps = []
-    for _ in range(n_splits):
-        np.random.shuffle(data)
-        half = data.shape[0] // 2
-        correlation_maps.append(pearson_corr(data[:half].mean(axis=0),
-                                             data[half:].mean(axis=0)))
-    correlation_map = np.array(correlation_maps).mean(axis=0)
+    if splits is None:
+        splits = random_half_splits(data.shape[0], n_splits)
+
+    values = []
+    for first_half in splits:
+        in_first = np.zeros(data.shape[0], dtype=bool)
+        in_first[first_half] = True
+        r = pearson_corr(data[in_first].mean(axis=0), data[~in_first].mean(axis=0))
+        values.append(2 * r / (1 + r) if correction else r)
+    value = np.mean(values, axis=0)
 
     if correction:
-        correlation_map[correlation_map < 0] = 0
-        correlation_map = np.sqrt((correlation_map * 2) / (1 + correlation_map))
+        value = np.sqrt(np.maximum(value, 0))
 
-    return correlation_map
+    return value
 
 
 def leave_one_out_correlation(data, index=0):
@@ -66,14 +75,20 @@ def mean_to_one_correlation(data, index=0):
 
 
 def allen_noise_ceiling(data):
-    """SNR: noise ceiling from the signal-to-noise ratio (Allen et al.)."""
+    """ATV: noise ceiling from the signal-to-noise ratio (Allen et al.).
+
+    Every trial is centred over time first, otherwise offsets between trials
+    would count as noise. The variance over time uses 1/T and the variance
+    across trials 1/(n - 1). The estimate is 0 where the mean has no variance.
+    """
     n_trials = data.shape[0]
-    sigma_total = data.mean(axis=0).var(axis=-1, ddof=1)
+    data = data - data.mean(axis=-1, keepdims=True)
+    sigma_total = data.mean(axis=0).var(axis=-1)
     sigma_noise = data.var(axis=0, ddof=1).mean(axis=-1)
 
-    diff = sigma_total - sigma_noise / n_trials
-    diff[diff < 0] = 0
-    return np.sqrt(diff / sigma_total)
+    ratio = np.divide(sigma_total - sigma_noise / n_trials, sigma_total,
+                      out=np.zeros_like(sigma_total), where=sigma_total > 0)
+    return np.sqrt(np.maximum(ratio, 0))
 
 
 def get_unique_subsets(data, subset_length, n_bootstraps):

@@ -1,23 +1,9 @@
-"""Bias of the estimators as a function of the number of samples."""
+"""Fit of an estimate against the number of samples T, NC(T) = a - b T^-p."""
 
 from __future__ import annotations
 
 import numpy as np
 from scipy.optimize import curve_fit
-
-from .datasets.synthetic import ALL_ESTIMATORS
-
-
-def bias(result):
-    """Bias of each estimator in a `sweep_T` result. Positive means underestimation.
-
-    Uses the estimate at T_ref as the reference when the sweep was anchored on
-    it, and the closed forms otherwise.
-    """
-    reference = result.get("reference")
-    if reference is not None:
-        return {k: reference[k] - result["empirical"][k] for k in ALL_ESTIMATORS}
-    return {k: result["theory"][k] - result["empirical"][k] for k in ALL_ESTIMATORS}
 
 
 def saturating(T, a, b, p=1.0):
@@ -53,25 +39,3 @@ def fit_saturating(T, values, free_exponent=True):
     except (RuntimeError, ValueError):
         return None, None
     return popt, np.sqrt(np.maximum(np.diag(pcov), 0))
-
-
-def fit_power(T, measured, T_ref, p0=(1.0, 1.0)):
-    """Fit measured(T) = c (T^-p - T_ref^-p) and return (c, p, standard error of p).
-
-    A log-log slope would be biased steep for an anchored curve, because the
-    T_ref term flattens it at large T.
-    """
-    T = np.asarray(T, dtype=float)
-    y = np.asarray(measured, dtype=float)
-    finite = np.isfinite(y)
-    if finite.sum() < 3:
-        return np.nan, np.nan, np.nan
-
-    def model(t, c, p):
-        return c * (t ** -p - float(T_ref) ** -p)
-
-    try:
-        (c, p), cov = curve_fit(model, T[finite], y[finite], p0=p0, maxfev=40000)
-    except (RuntimeError, ValueError):
-        return np.nan, np.nan, np.nan
-    return float(c), float(p), float(np.sqrt(np.maximum(cov[1, 1], 0)))

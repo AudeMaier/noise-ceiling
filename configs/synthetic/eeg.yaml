@@ -1,0 +1,21 @@
+# Figure 2, synthetic panel. Same latent sources in every trial.
+name: eeg
+model:
+  X: 10
+  Y: 10
+  K: 200
+  crop: [100, 100]
+  T: 200
+  n: 80
+  shared_fraction: 0.15
+  width: 1.0
+  sigma: 2.75
+  sigma_spread: 0.9   # std of log sigma across units, matched to the real EEG
+  sigma_origin: 1.0
+  within_subject: true
+  gaussian_signals: true
+sweep:
+  n_iter: 10          # dataset regenerations, sets the confidence intervals
+  n_rep: 50            # trial subsets per n
+estimators:
+  run_loop: false

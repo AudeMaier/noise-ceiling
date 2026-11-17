@@ -12,108 +12,151 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
+from matplotlib.transforms import offset_copy
 
-from .style import (ELINEWIDTH, LABELS, LINEWIDTH, LINEWIDTH_THEORY, PAPER_COLORS,
-                    SWEEP_COLORS)
+from .style import (ELINEWIDTH, FONT_LABEL, FONT_LEGEND, FONT_TICKS, FONT_TITLE,
+                    FONT_XLABEL, LABELS, LINEWIDTH, LINEWIDTH_THEORY, LINEWIDTHS,
+                    PANEL_GAP, PANEL_SIZE, PAPER_COLORS, SWEEP_COLORS)
 
 
-def _over_all_but_first(values):
-    """Mean and standard deviation over every axis except the first."""
-    axis = tuple(range(1, values.ndim))
-    return np.nanmean(values, axis=axis), np.nanstd(values, axis=axis)
+def _mean_over_all_but_first(values):
+    """Mean over every axis except the first."""
+    return np.nanmean(values, axis=tuple(range(1, values.ndim)))
+
+
+def _mean_and_ci(values):
+    """Mean over the first axis (repetitions) and the half-width of its asymptotic
+    95% interval, 1.96 standard errors."""
+    count = np.sum(~np.isnan(values), axis=0)
+    se = np.nanstd(values, axis=0, ddof=1) / np.sqrt(count)
+    return np.nanmean(values, axis=0), 1.96 * se
+
+
+def _panel_row(n_panels):
+    """A figure holding a row of panels of exactly PANEL_SIZE inches.
+
+    Tick labels, axis labels, titles and legends are drawn outside the panels;
+    saving with bbox_inches="tight" grows the file to include them.
+    """
+    width, height = PANEL_SIZE
+    fig_width = n_panels * width + (n_panels - 1) * PANEL_GAP
+    fig = plt.figure(figsize=(fig_width, height))
+    axes = [fig.add_axes([i * (width + PANEL_GAP) / fig_width, 0, width / fig_width, 1])
+            for i in range(n_panels)]
+    return fig, axes
+
+
+def _above_panels(fig, points):
+    """Figure coordinates shifted up by `points`, to place text above the panel titles."""
+    return offset_copy(fig.transFigure, fig=fig, y=points, units="points")
+
+
+def _style_panel(ax, title, ylim, xlabel):
+    ax.set_ylim(*ylim)
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
+    ax.tick_params(labelsize=FONT_TICKS)
+    ax.set_xlabel(xlabel, fontsize=FONT_XLABEL)
+    ax.set_title(title, fontsize=FONT_TITLE)
 
 
 def plot_synthetic_vs_empirical(synthetic, theory, empirical, n_list, estimators,
-                                n_synthetic=10, n_empirical=50, ylim=(0, 0.9),
-                                titles=("Synthetic Data", "fMRI Data"),
+                                n_list_empirical=None, ylim=(0, 0.9),
+                                titles=("Synthetic Data", "Brain Data"),
                                 xlabel="Number of trials (n)",
-                                ylabel="Noise Ceiling Value", legend_ncol=2, loop=False):
+                                ylabel="Noise Ceiling Value", legend_ncol=2, loop=False,
+                                legend=True, axes=None):
     """Synthetic and recorded estimates side by side, closed forms dotted.
 
     synthetic, theory : (n_repetitions, len(n_list)), one entry per estimator.
-    empirical         : (len(n_list), ...), averaged over every remaining axis.
-    n_synthetic, n_empirical : denominators of the standard errors.
+                        The synthetic error bars are asymptotic 95% intervals
+                        over the repetitions (generated datasets).
+    empirical         : (len(n_list_empirical), ...), averaged over every
+                        remaining axis.
+    n_list_empirical  : trial counts of the recorded sweep, n_list if None.
+    axes              : (synthetic, recorded) axes to draw into, for a figure
+                        holding several pairs; a new figure is made if None.
     """
-    fig, (ax_syn, ax_emp) = plt.subplots(1, 2, figsize=(5.5, 3))
+    n_list_empirical = n_list if n_list_empirical is None else n_list_empirical
+    if axes is None:
+        fig, (ax_syn, ax_emp) = _panel_row(2)
+    else:
+        (ax_syn, ax_emp), fig = axes, axes[0].figure
 
-    for key in estimators:
-        ax_syn.errorbar(n_list, np.nanmean(synthetic[key], axis=0),
-                        yerr=2 * np.nanstd(synthetic[key], axis=0) / np.sqrt(n_synthetic),
-                        label=LABELS[key], color=PAPER_COLORS[key],
-                        linewidth=LINEWIDTH, elinewidth=ELINEWIDTH, zorder=1)
-        ax_syn.plot(n_list, np.nanmean(theory[key], axis=0), color="k",
-                    linestyle="dotted", linewidth=LINEWIDTH_THEORY, zorder=2)
-    if loop and "LOOP" in synthetic:
-        ax_syn.errorbar(n_list, np.nanmean(synthetic["LOOP"], axis=0),
-                        yerr=2 * np.nanstd(synthetic["LOOP"], axis=0) / np.sqrt(n_synthetic),
-                        label=LABELS["LOOP"], color=PAPER_COLORS["LOOP"],
-                        linewidth=LINEWIDTH, elinewidth=ELINEWIDTH, zorder=1)
-    for key in estimators:
-        if key not in empirical:
-            continue
-        mean, std = _over_all_but_first(empirical[key])
-        ax_emp.errorbar(n_list, mean, yerr=2 * std / np.sqrt(n_empirical),
-                        label=LABELS[key], color=PAPER_COLORS[key],
-                        linewidth=LINEWIDTH, elinewidth=ELINEWIDTH)
+    synthetic_keys = list(estimators) + (["LOOP"] if loop and "LOOP" in synthetic else [])
+    for key in synthetic_keys:
+        mean, ci = _mean_and_ci(synthetic[key])
+        ax_syn.errorbar(n_list, mean, yerr=ci, color=PAPER_COLORS[key], label=LABELS[key],
+                        linewidth=LINEWIDTHS.get(key, LINEWIDTH), elinewidth=ELINEWIDTH,
+                        zorder=1)
+        if key in theory:
+            ax_syn.plot(n_list, np.nanmean(theory[key], axis=0), color="k",
+                        linestyle="dotted", linewidth=LINEWIDTH_THEORY, zorder=2)
+
+    empirical_keys = [k for k in estimators if k in empirical]
     if loop and "LOOP" in empirical:
-        mean, std = _over_all_but_first(empirical["LOOP"])
-        ax_emp.errorbar(n_list, mean, yerr=2 * std / np.sqrt(n_empirical),
-                        label=LABELS["LOOP"], color=PAPER_COLORS["LOOP"],
-                        linewidth=LINEWIDTH, elinewidth=ELINEWIDTH)
+        empirical_keys.append("LOOP")
+    for key in empirical_keys:
+        ax_emp.plot(n_list_empirical, _mean_over_all_but_first(empirical[key]),
+                    label=LABELS[key], color=PAPER_COLORS[key],
+                    linewidth=LINEWIDTHS.get(key, LINEWIDTH))
 
-    for ax, title in zip((ax_syn, ax_emp), titles):
-        ax.set_ylim(*ylim)
-        ax.set_xticks(n_list)
-        ax.set_xlabel(xlabel)
-        ax.set_title(title, fontsize=13)
+    for ax, title in ((ax_syn, titles[0]), (ax_emp, titles[1])):
+        _style_panel(ax, title, ylim, xlabel)
 
-    ax_syn.set_ylabel(ylabel, fontsize=12)
+    ax_syn.set_ylabel(ylabel, fontsize=FONT_LABEL)
     ax_emp.set_yticklabels([])
-    ax_syn.legend(ncol=legend_ncol, fontsize=12, bbox_to_anchor=(0.5, 1.5),
-                  loc="upper center")
+    if legend:
+        handles, labels = ax_syn.get_legend_handles_labels()
+        fig.legend(handles, labels, ncol=legend_ncol, fontsize=FONT_LEGEND,
+                   loc="lower center", bbox_to_anchor=(0.5, 1),
+                   bbox_transform=_above_panels(fig, FONT_TITLE + 10))
     return fig
 
 
 def plot_empirical(results, n_list, mean_estimators, single_estimators,
-                   n_empirical=50, ylim=(0, 0.9), title=None,
+                   ylim=(0, 0.9), title=None,
                    xlabel="Number of trials (n)", ylabel="Noise Ceiling Value",
                    legend=True):
     """Mean and single-trial estimators of one recorded dataset, side by side."""
-    fig, (ax_mean, ax_single) = plt.subplots(1, 2, figsize=(5, 3))
+    fig, (ax_mean, ax_single) = _panel_row(2)
+    panels = ((ax_mean, mean_estimators, r"$NC^{mean}$"),
+              (ax_single, single_estimators, r"$NC^{single}$"))
 
-    for ax, estimators in ((ax_mean, mean_estimators), (ax_single, single_estimators)):
+    for ax, estimators, panel_title in panels:
         for key in estimators:
             if key not in results:
                 continue
-            mean, std = _over_all_but_first(results[key])
-            ax.errorbar(n_list, mean, yerr=2 * std / np.sqrt(n_empirical),
-                        label=LABELS[key], color=PAPER_COLORS[key],
-                        linewidth=LINEWIDTH, elinewidth=ELINEWIDTH)
-        ax.set_ylim(*ylim)
-        ax.set_xticks(n_list)
-        ax.set_xlabel(xlabel)
-        if legend:
-            ax.legend(fontsize=10)
+            ax.plot(n_list, _mean_over_all_but_first(results[key]),
+                    label=LABELS[key], color=PAPER_COLORS[key],
+                    linewidth=LINEWIDTHS.get(key, LINEWIDTH))
+        _style_panel(ax, panel_title, ylim, xlabel)
 
-    ax_mean.set_title(r"$NC^{mean}$ estimators", fontsize=13)
-    ax_single.set_title(r"$NC^{single}$ estimators", fontsize=13)
-    ax_mean.set_ylabel(ylabel, fontsize=12)
+    ax_mean.set_ylabel(ylabel, fontsize=FONT_LABEL)
     ax_single.set_yticklabels([])
+    if legend:
+        handles, labels = [sum(pair, []) for pair in zip(
+            ax_mean.get_legend_handles_labels(), ax_single.get_legend_handles_labels())]
+        fig.legend(handles, labels, fontsize=FONT_LEGEND, loc="center left",
+                   bbox_to_anchor=(1, 0.5),
+                   bbox_transform=offset_copy(fig.transFigure, fig=fig, x=8, units="points"))
 
     if title is not None:
-        fig.suptitle(title, fontsize=17, y=1.1)
-    fig.subplots_adjust(wspace=0.05)
+        fig.text(0.5, 1, title, ha="center", va="bottom", fontsize=FONT_TITLE + 3,
+                 transform=_above_panels(fig, FONT_TITLE + 10))
     return fig
 
 
 def plot_finite_T(panels, T_values, estimators, fits, free_exponent=True,
-                  xlabel="Number of samples (T)", ylabel="Noise Ceiling Value"):
+                  xlabel="Number of samples (T)", ylabel="Noise Ceiling Value",
+                  errors=None, legend_fontsize=13):
     """Estimates against window length, one panel per dataset.
 
     panels : ordered mapping from panel title to a dict of (len(T), n_rep) arrays.
     fits   : same keys as `panels`, mapping estimator to the parameters returned
              by `fit_saturating`, or None where the fit failed.
+    errors : optional, like `fits` but with the standard errors returned by
+             `fit_saturating`; the legend then gives the 95% interval of p.
 
     Points are the mean over windows; the dashed line is the fitted
     a - b T^-p, and the legend gives the exponent.
@@ -130,8 +173,6 @@ def plot_finite_T(panels, T_values, estimators, fits, free_exponent=True,
         for key in estimators:
             if key not in panels[title]:
                 continue
-            ax.plot(T_values, np.nanmean(panels[title][key], axis=1), "x",
-                    color=PAPER_COLORS[key], markersize=4)
 
             popt = fits[title].get(key)
             if popt is None:
@@ -139,14 +180,19 @@ def plot_finite_T(panels, T_values, estimators, fits, free_exponent=True,
                 continue
             exponent = popt[2] if free_exponent else 1.0
             asymptote = popt[0]
+            label = f"{LABELS[key]}   $p = {exponent:.2f}"
+            if free_exponent and errors is not None and errors[title].get(key) is not None:
+                label += rf" \pm {1.96 * errors[title][key][2]:.2f}"
+            ax.plot(T_values, np.nanmean(panels[title][key], axis=1), "x",
+                    color=PAPER_COLORS[key], markersize=6, label=label + "$")
             ax.plot(grid, saturating(grid, *popt), "k--",
-                    linewidth=1.6,
-                    label=f"{LABELS[key]}   $p$ = {exponent:.2f}")
+                    linewidth=1.6)
             ax.axhline(asymptote, linestyle='--', color='darkgray', linewidth=1.6)
 
         ax.set_xlabel(xlabel)
         ax.set_title(title, fontsize=13)
-        ax.legend(fontsize=9)
+        #put legend outside of the plot
+        ax.legend(fontsize=legend_fontsize, loc="upper left", bbox_to_anchor=(1, 1))
 
     axes[0].set_ylabel(ylabel, fontsize=12)
     fig.tight_layout()
@@ -159,7 +205,6 @@ def plot_theory_vs_empirical(empirical, theory, n_values, mean_estimators,
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharex=True)
     panels = ((axes[0], mean_estimators, r"$NC^{\mathrm{mean}}$ estimators"),
               (axes[1], single_estimators, r"$NC^{\mathrm{single}}$ estimators"))
-    print(empirical.keys())
 
     for ax, estimators, panel_title in panels:
         for key in estimators:
@@ -172,6 +217,9 @@ def plot_theory_vs_empirical(empirical, theory, n_values, mean_estimators,
             mean = np.nanmean(empirical["LOOP"], axis=0)
             se = np.nanstd(empirical["LOOP"], axis=0, ddof=1) / np.sqrt(n_repetitions)
             ax.errorbar(n_values, mean, yerr=2 * se, label="LOOP", color=SWEEP_COLORS["LOOP"], capsize=2, lw=1.4)
+            if "LOOP_null" in empirical:
+                ax.plot(n_values, np.nanmean(empirical["LOOP_null"], axis=0), "--",
+                        color=SWEEP_COLORS["LOOP_null"], lw=1.4, label=LABELS["LOOP_null"])
         ax.set_xlabel("Number of trials")
         ax.set_ylabel("Noise ceiling estimate")
         ax.set_title(panel_title)
@@ -187,60 +235,12 @@ def plot_sweep(results, n_list, title=None):
     """Diagnostic: every estimator of a recorded sweep on one pair of axes."""
     fig, ax = plt.subplots(figsize=(8, 6))
     for key, values in results.items():
-        mean, _ = _over_all_but_first(values)
-        ax.plot(n_list, mean, label=LABELS.get(key, key),
-                color=SWEEP_COLORS.get(key))
+        ax.plot(n_list, _mean_over_all_but_first(values), label=LABELS.get(key, key),
+                color=SWEEP_COLORS.get(key),
+                linestyle="--" if key.endswith("_null") else "-")
     ax.set_xlabel("Number of trials (n)")
     ax.set_ylabel("Noise ceiling estimate")
     if title is not None:
         ax.set_title(title)
     ax.legend()
-    return fig
-
-def plot_selection_comparison(curves, n_values, estimators=("NC_mean", "SHSB"),
-                              colors=None, linestyles=("--", "-"),
-                              xlabel="Number of trials (n)",
-                              ylabel="Noise Ceiling Value", title=None):
-    """One curve per (unit selection, estimator) pair.
- 
-    curves : mapping from selection name to {estimator: array}, each array of
-             shape (n_repetitions, len(n_values)) or (len(n_values),).
- 
-    Colour identifies the selection, line style the estimator, so that the gap
-    between an estimator and the true ceiling can be read within each colour.
-    """
-    default_colors = ["#7A7A7A", "#4A93D8", "#EB8642", "#4CC275", "#C55995"]
-    colors = colors or {name: default_colors[i % len(default_colors)]
-                        for i, name in enumerate(curves)}
- 
-    fig, ax = plt.subplots(figsize=(6.5, 4))
- 
-    for name, per_estimator in curves.items():
-        for key, linestyle in zip(estimators, linestyles):
-            values = np.atleast_2d(per_estimator[key])
-            mean = np.nanmean(values, axis=0)
-            ax.plot(n_values, mean, linestyle=linestyle, color=colors[name],
-                    linewidth=2, label=None)
-            if values.shape[0] > 1:
-                se = np.nanstd(values, axis=0, ddof=1) / np.sqrt(values.shape[0])
-                ax.fill_between(n_values, mean - 2 * se, mean + 2 * se,
-                                color=colors[name], alpha=0.15, linewidth=0)
- 
-    selection_handles = [Line2D([], [], color=colors[name], linewidth=2, label=name)
-                         for name in curves]
-    estimator_handles = [Line2D([], [], color="k", linestyle=style,
-                                linewidth=2, label=LABELS.get(key, key))
-                         for key, style in zip(estimators, linestyles)]
- 
-    first = ax.legend(handles=selection_handles, fontsize=9, loc="lower right",
-                      title="Units kept", title_fontsize=9)
-    ax.add_artist(first)
-    ax.legend(handles=estimator_handles, fontsize=9, loc="upper left")
- 
-    ax.set_xticks(n_values)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel, fontsize=12)
-    if title is not None:
-        ax.set_title(title, fontsize=13)
-    fig.tight_layout()
     return fig

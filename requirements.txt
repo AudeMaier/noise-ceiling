@@ -1,0 +1,10 @@
+# Environment every result was produced with: Python 3.12.
+# The torch wheel bundles CUDA 12.4; on a GPU it needs an NVIDIA driver
+# supporting CUDA 12. Only LOOP uses the GPU.
+numpy==2.1.3
+scipy==1.15.1
+matplotlib==3.10.0
+torch==2.6.0
+tqdm==4.67.1
+PyYAML==6.0.2
+pytest==8.3.4

@@ -1,10 +1,27 @@
 """LOOP: leave-one-out prediction.
 
 One trial is predicted from all the others with a ridge encoding model, and the
-held-out correlation is the noise ceiling estimate. Unlike the correlation-based
-estimators, LOOP needs a train/test split; `make_split` builds it, and the same
-split can be handed to the other estimators so that all of them are evaluated on
-the same held-out samples.
+held-out correlation is the noise ceiling estimate.
+
+The recording is split by run: each run is held out in turn as the test set and
+the model is fitted on the others. Every run, and every segment used to choose
+the ridge parameter, is preprocessed on its own, so that no test value enters
+the preprocessing of the data the model is fitted on. A high-pass fitted on the
+whole recording before splitting couples the test samples to the training ones
+(their projections on the removed cosines are tied), and a ridge that fits the
+training target closely inherits that coupling as a spurious test correlation.
+
+The ridge parameter is chosen per unit by leave-one-segment-out within the
+training runs, on a grid relative to the Frobenius norm of the standardised
+training predictors, sqrt(n_samples * n_features). It follows the scale of the
+singular values as the number of samples and predictors changes, without an SVD.
+
+Two predictor sets are available (`variant`):
+
+full      every unit of every other trial, (n-1) * n_units predictors. It can
+          recover the held-out trial's weights from the span of the others.
+average   every unit of the average of the other trials, n_units predictors,
+          better conditioned but unable to weight the trials individually.
 """
 
 from __future__ import annotations
@@ -12,61 +29,65 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from .ridge_GPU.ridge_regression import ridge_corr_pred_torch, ridge_corr_torch
+from .ridge_GPU.ridge_regression import ridge_corr_torch
+
+DEFAULT_ALPHA_FRACTIONS = np.logspace(-4, 2, 13)
 
 
-def purged_test_chunks(data_length, n_chunks=5, test_fraction=0.25, buffer_size=50):
-    """Contiguous test chunks, one per equal-width bin.
+def run_slices(n_samples, run_lengths=None):
+    """One slice per run; two halves if run_lengths is None."""
+    if run_lengths is None:
+        run_lengths = [n_samples // 2, n_samples - n_samples // 2]
+    if sum(run_lengths) != n_samples:
+        raise ValueError(f"run_lengths sum to {sum(run_lengths)}, expected {n_samples}")
+    bounds = np.cumsum([0] + list(run_lengths))
+    return [slice(a, b) for a, b in zip(bounds[:-1], bounds[1:])]
 
-    A buffer of `buffer_size` samples on each side of a chunk is excluded from
-    training, so that autocorrelation cannot leak across the split.
+
+def run_folds(data, run_lengths=None, preprocess=None, n_segments=4):
+    """Cut a recording into runs, and every run into contiguous segments.
+
+    data        : (..., n_samples).
+    run_lengths : lengths of the runs, summing to n_samples; two halves if None.
+    preprocess  : applied to every run and every segment on its own, (..., T) to
+                  (..., T). None leaves the data unchanged.
+
+    Returns the list of preprocessed runs and, for each run, the list of its
+    preprocessed segments.
     """
-    chunk_size = int(data_length * test_fraction) // n_chunks
-    bin_size = data_length // n_chunks
-
-    if chunk_size < 1:
-        raise ValueError(
-            f"test_fraction={test_fraction} with n_chunks={n_chunks} gives chunks "
-            f"of less than one sample for data_length={data_length}")
-    if bin_size - chunk_size < 1:
-        raise ValueError(
-            f"bins of {bin_size} samples cannot hold a {chunk_size}-sample chunk; "
-            f"reduce n_chunks or test_fraction")
-
-    test_indices, buffered = [], []
-    for i in range(n_chunks):
-        start = np.random.randint(i * bin_size, (i + 1) * bin_size - chunk_size)
-        end = start + chunk_size
-        test_indices.append(np.arange(start, end))
-        buffered.append(np.arange(max(0, start - buffer_size),
-                                  min(data_length, end + buffer_size)))
-
-    test_idx = np.concatenate(test_indices)
-    keep = np.ones(data_length, dtype=bool)
-    keep[np.concatenate(buffered)] = False
-    return np.where(keep)[0], test_idx
+    preprocess = preprocess or (lambda x: x)
+    raw_runs = [data[..., run] for run in run_slices(data.shape[-1], run_lengths)]
+    runs = [preprocess(run) for run in raw_runs]
+    segments = [[preprocess(segment) for segment in np.array_split(run, n_segments, axis=-1)]
+                for run in raw_runs]
+    return runs, segments
 
 
-def random_split(data_length, test_fraction=0.25):
-    """Test samples drawn uniformly at random, with no buffer."""
-    test_idx = np.random.choice(data_length, size=int(test_fraction * data_length),
-                                replace=False)
-    return np.setdiff1d(np.arange(data_length), test_idx), test_idx
+def circular_shift(data, run_lengths=None, rng=None, min_shift=0.1):
+    """Null data: every trial shifted circularly in time, independently within every run.
 
-
-def make_split(data_length, chunked=True, n_chunks=5, test_fraction=0.25,
-               buffer_size=50):
-    """Train/test split as (train_idx, test_idx).
-
-    chunked=True gives purged contiguous chunks, appropriate when neighbouring
-    samples are correlated (a continuous stimulus). chunked=False gives a random
-    split, appropriate when the last axis indexes unrelated stimuli.
+    The shifts keep the autocorrelation of each trial but break the alignment
+    across trials, so a leak-free LOOP gives zero. data : (n_trials, ..., n_samples).
     """
-    if chunked:
-        return purged_test_chunks(data_length, n_chunks=n_chunks,
-                                  test_fraction=test_fraction,
-                                  buffer_size=buffer_size)
-    return random_split(data_length, test_fraction=test_fraction)
+    rng = np.random.default_rng() if rng is None else rng
+    out = np.empty_like(data)
+    for run in run_slices(data.shape[-1], run_lengths):
+        length = run.stop - run.start
+        low = max(1, int(min_shift * length))
+        for trial in range(data.shape[0]):
+            out[trial, ..., run] = np.roll(data[trial, ..., run],
+                                           rng.integers(low, length - low + 1), axis=-1)
+    return out
+
+
+def _design(data, index, variant):
+    """Predictors (n_samples, n_features) and target (n_samples, n_units)."""
+    others = np.delete(data, index, axis=0)
+    if variant == "average":
+        variables = others.mean(axis=0).T
+    else:
+        variables = others.reshape(-1, data.shape[-1]).T
+    return variables, data[index].T
 
 
 def _standardize(train, *others, eps=1e-8):
@@ -77,82 +98,60 @@ def _standardize(train, *others, eps=1e-8):
     return [(a - mu) / sd for a in (train,) + others]
 
 
-def ridge_prediction(variables, target, split, device="cpu",
-                     alphas=np.logspace(-3, 3, 7), n_validations=3,
-                     val_fraction=0.1, val_chunk=True, n_chunk_val=3,
-                     val_buffer=50, standardize="train", verbose=False,
-                     return_alphas=False):
-    """Ridge prediction of `target` (T, n_targets) from `variables` (T, n_features).
-
-    The ridge parameter is selected per target on validation splits drawn from
-    the training samples, then the model is refit on the full training set.
-
-    split       : (train_idx, test_idx), from `make_split`.
-    standardize : "train" uses training statistics only; "all" uses the whole
-                  recording, which lets held-out samples inform the penalty.
-
-    Returns the test correlation per target, and the selected ridge parameters
-    if `return_alphas`.
-    """
-    log = print if verbose else (lambda *args, **kwargs: None)
-
-    if standardize == "all":
-        variables = (variables - variables.mean(0)) / variables.std(0)
-        target = (target - target.mean(0)) / target.std(0)
-
-    train_idx, test_idx = split
-    X_train, X_test = variables[train_idx], variables[test_idx]
-    y_train, y_test = target[train_idx], target[test_idx]
-
-    if standardize == "train":
-        X_train, X_test = _standardize(X_train, X_test)
-        y_train, y_test = _standardize(y_train, y_test)
+def _test_scores(train, test, index, alphas, variant, device):
+    """Test correlation of every unit for every ridge parameter, (n_alphas, n_units)."""
+    X_train, y_train = _design(train, index, variant)
+    X_test, y_test = _design(test, index, variant)
+    X_train, X_test = _standardize(X_train, X_test)
+    y_train, y_test = _standardize(y_train, y_test)
 
     def to_tensor(array):
-        return torch.tensor(array).to(device).to(float)
+        return torch.tensor(np.ascontiguousarray(array), dtype=torch.float64, device=device)
 
-    X_train_t, y_train_t = to_tensor(X_train), to_tensor(y_train)
-
-    scores = torch.zeros((len(alphas), y_test.shape[1])).to(device)
-    for _ in range(n_validations):
-        sub_train, sub_val = make_split(X_train.shape[0], chunked=val_chunk,
-                                        n_chunks=n_chunk_val,
-                                        test_fraction=val_fraction,
-                                        buffer_size=val_buffer)
-        scores += ridge_corr_torch(X_train_t[sub_train], X_train_t[sub_val],
-                                   y_train_t[sub_train], y_train_t[sub_val],
-                                   alphas) / n_validations
-
-    best_idx = torch.argmax(scores.cpu(), dim=0).numpy()
-    best_alpha = np.asarray(alphas)[best_idx]
-
-    n_low = int(np.sum(best_idx == 0))
-    n_high = int(np.sum(best_idx == len(alphas) - 1))
-    if n_low or n_high:
-        print(f"[loop] {n_low} targets selected the smallest and {n_high} the "
-              f"largest of {len(alphas)} ridge parameters; widen `alphas`.")
-
-    out = ridge_corr_pred_torch(X_train_t, to_tensor(X_test), y_train_t,
-                                to_tensor(y_test), to_tensor(best_alpha),
-                                normalpha=False)
-    log(out.mean().item())
-    out = out.cpu().numpy()
-    return (out, best_alpha) if return_alphas else out
+    return ridge_corr_torch(to_tensor(X_train), to_tensor(X_test), to_tensor(y_train),
+                            to_tensor(y_test), alphas).cpu().numpy()
 
 
-def loop_estimate(data, split, alphas, index=0, device="cpu", n_validations=10,
-                  val_chunk=True, **kwargs):
-    """LOOP estimate for one held-out trial.
+def _alpha_scale(data, index, variant):
+    """Frobenius norm of the standardised predictors: every column has unit variance."""
+    n_features = data.shape[1] if variant == "average" else (data.shape[0] - 1) * data.shape[1]
+    return np.sqrt(data.shape[-1] * n_features)
 
-    Predicts every unit of trial `index` from all units of the remaining trials.
 
-    data : (n_trials, n_units, n_samples).
+def loop_estimate(runs, segments, index=0, alpha_fractions=DEFAULT_ALPHA_FRACTIONS,
+                  variant="full", device="cpu", return_alphas=False):
+    """LOOP estimate of one trial, every run held out in turn.
 
-    Returns the held-out correlation per unit.
+    runs     : list of (n_trials, n_units, T_r), each preprocessed on its own.
+    segments : for every run, the list of its segments, each preprocessed on its
+               own, as returned by `run_folds`.
+
+    For every test run the model is fitted on the other runs, with the ridge
+    parameter chosen per unit by leave-one-segment-out within them, and scored
+    on the test run. Returns the test correlation per unit averaged over the
+    test runs, and the selected ridge parameters (n_runs, n_units) if
+    `return_alphas`.
     """
-    n_samples = data.shape[-1]
-    variables = np.delete(data, index, axis=0).reshape(-1, n_samples).T
-    target = data[index].T
-    return ridge_prediction(variables, target, split, device=device, alphas=alphas,
-                            n_validations=n_validations, val_chunk=val_chunk,
-                            **kwargs)
+    if variant not in ("full", "average"):
+        raise ValueError(f"unknown variant {variant!r}; expected 'full' or 'average'")
+
+    per_run, chosen = [], []
+    for test in range(len(runs)):
+        train = np.concatenate([run for r, run in enumerate(runs) if r != test], axis=-1)
+        alphas = _alpha_scale(train, index, variant) * np.asarray(alpha_fractions)
+
+        folds = [segment for r, run_segments in enumerate(segments) if r != test
+                 for segment in run_segments]
+        validation = 0
+        for k in range(len(folds)):
+            fit = np.concatenate([f for j, f in enumerate(folds) if j != k], axis=-1)
+            validation = validation + _test_scores(fit, folds[k], index, alphas,
+                                                   variant, device) / len(folds)
+        best = np.argmax(validation, axis=0)
+
+        scores = _test_scores(train, runs[test], index, alphas, variant, device)
+        per_run.append(scores[best, np.arange(scores.shape[1])])
+        chosen.append(alphas[best])
+
+    out = np.mean(per_run, axis=0)
+    return (out, np.array(chosen)) if return_alphas else out

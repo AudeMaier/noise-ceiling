@@ -5,9 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "noise-ceiling"
 version = "0.1.0"
-description = "Bias and convergence of noise ceiling estimators"
+description = "Code for the paper Accuracy of Noise Ceiling Estimators for Brain Scores"
+authors = [
+    { name = "Aude Maier" },
+    { name = "Lucas Gruaz" },
+    { name = "Martin Schrimpf" },
+    { name = "Johanni Brea" },
+]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.21",
     "scipy>=1.7",

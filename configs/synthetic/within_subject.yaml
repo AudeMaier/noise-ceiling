@@ -1,4 +1,3 @@
-# Figure 2, synthetic panel
 name: within_subject
 model:
   X: 10
@@ -7,16 +6,15 @@ model:
   crop: [100, 100]
   T: 100
   n: 12
-  shared_fraction: 0.35
+  shared_fraction: 0.3
   width: 1.0
-  sigma: 0.6
+  sigma: 4
+  sigma_spread: 1   # std of log sigma across units
   sigma_origin: 1.0
   within_subject: true
   gaussian_signals: true
 sweep:
   n_iter: 10          # dataset regenerations, sets the confidence intervals
-  n_rep: 5            # trial subsets per n
-  realized: false
+  n_rep: 50            # trial subsets per n
 estimators:
   run_loop: false
-  chunked: false

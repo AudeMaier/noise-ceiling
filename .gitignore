@@ -2,8 +2,20 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.venv/
 
 data/
 results/
-rebuttal_answers/
-tests/
+figures/intermediate_figures/
+
+# Windows download metadata
+*:Zone.Identifier
+
+# Kept locally, not part of the paper
+exploration/
+configs/violations/
+configs/synthetic/finite_T.yaml
+experiments/run_violations.py
+experiments/run_T_convergence.py
+experiments/run_T_convergence_things.py
+noise_ceiling/datasets/violations.py

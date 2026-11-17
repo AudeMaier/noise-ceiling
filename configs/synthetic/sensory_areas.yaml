@@ -1,22 +1,21 @@
-# Figure 3, V1 panel
 name: sensory_areas
 model:
   X: 10
   Y: 10
   K: 1000
   crop: [100, 100]
-  T: 2000
+  T: 1976
   n: 16
   shared_fraction: 0.6
   width: 2.0
-  sigma: 0.2
-  sigma_origin: 4.0
+  sigma: 0.6
+  sigma_spread: 0.6   # std of log sigma across units
+  sigma_origin: 5.0
   within_subject: false
   gaussian_signals: false
 sweep:
   n_iter: 10
-  n_rep: 5
-  realized: false
+  n_rep: 50
 estimators:
   run_loop: true
-  chunked: true
+  run_lengths: [946, 1030]   # as Sherlock; LOOP holds out each run

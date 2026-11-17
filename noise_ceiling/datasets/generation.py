@@ -1,9 +1,15 @@
+"""Generative model for the synthetic data.
+
+A set of K latent sources is drawn, some shared across trials and some specific
+to each trial. Every unit of a 2-D grid mixes the sources with Gaussian weights
+centred on the source positions, and Gaussian noise is added on top.
+"""
+
 from __future__ import annotations
 
 import numpy as np
 from scipy.signal import fftconvolve
 from scipy.stats import gamma
-from tqdm import tqdm
 
 
 def generate_neural(num_signals, T_total, lambda_=0.1, mu=5.0):
@@ -28,20 +34,21 @@ def generate_neural(num_signals, T_total, lambda_=0.1, mu=5.0):
     return underlying[:, :T_total]
 
 
-def hrf_kernel(tr=1.5, a1=6, a2=16, b1=1, b2=1, c=1.6, duration=30.0,
-               normalize=False):
-    """Double-gamma HRF sampled at `tr`.
-
-    normalize=True rescales the kernel to unit L2 norm, so that changing its
-    shape changes the timing and dispersion of the response without changing
-    the variance it imparts. Used by the heterogeneous-HRF violation, where a
-    shape-dependent gain would confound HRF variability with SNR.
-    """
+def hrf_kernel(tr=1.5, a1=6, a2=16, b1=1, b2=1, c=1.6, duration=30.0):
+    """Double-gamma HRF sampled at `tr`."""
     t_hrf = np.arange(0, duration, tr)
     kernel = gamma.pdf(t_hrf, a=a1, scale=b1) - gamma.pdf(t_hrf, a=a2, scale=b2) / c
-    if normalize:
-        kernel = kernel / np.sqrt(np.sum(kernel ** 2))
     return kernel
+
+
+def standardize(signals, eps=1e-12):
+    """Zero mean and unit variance along time, independently for each signal.
+
+    A flat signal (no event reaching the window) has no variance to rescale and
+    is returned as zeros.
+    """
+    centered = signals - signals.mean(axis=1, keepdims=True)
+    return centered / np.maximum(centered.std(axis=1, keepdims=True), eps)
 
 
 def generate_signals(num_signals, T, lambda_=0.1, mu=5.0, tr=1.5,
@@ -51,7 +58,7 @@ def generate_signals(num_signals, T, lambda_=0.1, mu=5.0, tr=1.5,
     crop : (pad_start, pad_end) samples generated then discarded, so that the
            returned signals are free of convolution edge effects.
 
-    Returns (num_signals, T) mean-centred signals.
+    Returns (num_signals, T) signals with zero mean and unit variance along time.
     """
     pad_start = crop[0] if crop is not None else 0
     pad_end = crop[1] if crop is not None else 0
@@ -61,15 +68,31 @@ def generate_signals(num_signals, T, lambda_=0.1, mu=5.0, tr=1.5,
     hrf = hrf_kernel(tr=tr, a1=a1, a2=a2, b1=b1, b2=b2, c=c)
     bold = fftconvolve(underlying, hrf[np.newaxis, :], mode="full", axes=1)[:, :T_total]
 
-    if crop is not None:
-        bold = bold[:, pad_start:-pad_end]
+    bold = bold[:, pad_start:pad_start + T]
 
-    return bold - bold.mean(axis=1, keepdims=True)
+    return standardize(bold)
 
 
-def generate_gaussian_signals(num_signals, T, sigma=np.sqrt(0.12)):
-    """White Gaussian sources, the temporally uncorrelated alternative."""
-    return np.random.normal(0, sigma, (num_signals, T))
+def generate_gaussian_signals(num_signals, T):
+    """White Gaussian sources, the temporally uncorrelated alternative.
+
+    Standardised along time like `generate_signals`.
+    """
+    return standardize(np.random.normal(0, 1, (num_signals, T)))
+
+
+def unit_noise_sd(sigma, sigma_spread, X, Y):
+    """Noise standard deviation of every unit, fixed across trials.
+
+    sigma_u = sigma * exp(sigma_spread * Z_u) with Z_u standard normal, so that
+    sigma is the median over units and sigma_spread the standard deviation of
+    log sigma_u. sigma_spread=0 gives the same sigma to every unit.
+
+    Returns (X, Y).
+    """
+    if sigma_spread == 0:
+        return np.full((X, Y), float(sigma))
+    return sigma * np.exp(sigma_spread * np.random.normal(0, 1, (X, Y)))
 
 
 def generate_origins(K, X, Y):
@@ -110,65 +133,28 @@ def generate_weights(base_origins, K, X, Y, n, sigma_origin=0.5, width=1.0,
     return W, all_origins
 
 
-def weight_moments(base_origins, W0, K, X, Y, shared_fraction, sigma_origin,
-                   width, within_subject=True, n_iter=100):
-    """Monte-Carlo weight moments needed by the closed forms.
-
-    Each iteration draws 1000 fresh trials, which are then split into
-    independent groups to estimate products of expectations: two groups of 500
-    for E[w]^2, three of 333 for E[w^2] E[w]^2, four of 250 for E[w]^4.
-
-    Returns per-unit sums over sources, of shape (X, Y).
-    """
-    K_shared = int(shared_fraction * K)
-    W0_s = W0[:, :, :K_shared]
-
-    keys = ["M_s", "mu_s", "M_i", "mu_i", "E_s",
-            "M_s4", "M_s2_2", "M_s_4", "M_s3_mu", "M_s2_mu2"]
-    moments = {key: np.zeros((X, Y)) for key in keys}
-
-    for _ in tqdm(range(n_iter), leave=False):
-        W, _ = generate_weights(base_origins, K, X=X, Y=Y, n=1000,
-                                sigma_origin=sigma_origin, width=width,
-                                within_subject=within_subject)
-        W_s, W_i = W[:, :, :, :K_shared], W[:, :, :, K_shared:]
-        W2_s = W_s * W_s
-
-        moments["M_s"] += W2_s.sum(axis=-1).mean(axis=0)
-        moments["mu_s"] += (W_s[:500] * W_s[500:]).sum(axis=-1).mean(axis=0)
-        moments["M_i"] += (W_i * W_i).sum(axis=-1).mean(axis=0)
-        moments["mu_i"] += (W_i[:500] * W_i[500:]).sum(axis=-1).mean(axis=0)
-        moments["E_s"] += (W_s * W0_s).sum(axis=-1).mean(axis=0)
-        moments["M_s4"] += (W2_s * W2_s).sum(axis=-1).mean(axis=0)
-        moments["M_s2_2"] += (W2_s[:500] * W2_s[500:]).sum(axis=-1).mean(axis=0)
-        moments["M_s_4"] += (W_s[:250] * W_s[250:500]
-                             * W_s[500:750] * W_s[750:]).sum(axis=-1).mean(axis=0)
-        moments["M_s3_mu"] += (W2_s[:500] * W_s[:500]
-                               * W_s[500:]).sum(axis=-1).mean(axis=0)
-        moments["M_s2_mu2"] += (W2_s[:333] * W_s[333:666]
-                                * W_s[666:999]).sum(axis=-1).mean(axis=0)
-
-    return {key: value / n_iter for key, value in moments.items()}
-
-
 def generate_voxel_grids(X, Y, T, K, lambda_=0.1, mu=5.0, tr=1.5, a1=6, a2=16,
-                         b1=1, b2=1, c=1.6, n=1, sigma=0.5, sigma_of_sigma=0,
+                         b1=1, b2=1, c=1.6, n=1, sigma=0.5,
                          shared_fraction=0.5, crop=None, sigma_origin=1,
-                         width=1.0, within_subject=True,
-                         partial_shared_fraction=0, gaussian_signals=False):
+                         width=1.0, within_subject=True, gaussian_signals=False,
+                         sigma_spread=0.0):
     """One realisation of the generative model.
 
     n                : number of trials.
     K                : number of latent sources, of which `shared_fraction` are
                        common to all trials.
-    sigma            : standard deviation of the additive noise; `sigma_of_sigma`
-                       makes it vary across units.
-    partial_shared_fraction : fraction of the shared sources silenced in each
-                       trial, so that they are shared by only some trials.
+    sigma            : standard deviation of the additive noise, the median
+                       over units when sigma_spread > 0.
+    sigma_spread     : standard deviation of log sigma_u across units, see
+                       `unit_noise_sd`. Each unit keeps its sigma_u in every trial.
 
-    Returns a dict with the noisy grids (n, X, Y, T), the grids that would be
-    obtained without noise or individual sources, the sources, the weights, the
-    weight moments, and a mask of units carrying no shared signal.
+    The noise-free signal is the part driven by the shared sources. The
+    individual sources are independent across trials, so they belong to the
+    noise, whose variance per trial and unit is
+    noise_var = sigma_u^2 + sum over individual sources of w^2.
+
+    Returns a dict with the noisy grids (n, X, Y, T), the noise-free grids, the
+    sources, the weights and the noise variance (n, X, Y).
     """
     num_shared = int(shared_fraction * K)
     signals = np.zeros((n, K, T))
@@ -202,30 +188,14 @@ def generate_voxel_grids(X, Y, T, K, lambda_=0.1, mu=5.0, tr=1.5, a1=6, a2=16,
                                       sigma_origin=sigma_origin, width=width,
                                       within_subject=within_subject)
 
-    for trial in range(n):
-        silenced = np.random.choice(num_shared,
-                                    size=int(partial_shared_fraction * num_shared),
-                                    replace=False)
-        W[trial, :, :, silenced] = 0
-
-    moments = weight_moments(base_origins, W[0], K, X, Y, shared_fraction,
-                             sigma_origin, width, within_subject=within_subject,
-                             n_iter=10)
-
     voxel_grids = np.einsum("nxyk,nkt->nxyt", W, signals)
     noiseless_grids = np.einsum("nxyk,nkt->nxyt", W[:, :, :, :num_shared],
                                 signals[:, :num_shared])
-    shared_mask = np.array([1] * num_shared + [0] * (K - num_shared))
-    individual_coords = np.where(
-        np.einsum("xyk,k->xy", W.mean(axis=0), shared_mask) == 0, 1, 0)
+    sigma_u = unit_noise_sd(sigma, sigma_spread, X, Y)
+    noise_var = sigma_u ** 2 + (W[:, :, :, num_shared:] ** 2).sum(axis=-1)
 
     if sigma > 0:
-        if sigma_of_sigma > 0:
-            sigma = np.random.normal(sigma, sigma_of_sigma, (n, X, Y))
-            noise = np.random.normal(0, sigma[:, :, :, np.newaxis], voxel_grids.shape)
-        else:
-            noise = np.random.normal(0, sigma, voxel_grids.shape)
-        voxel_grids += noise
+        voxel_grids += sigma_u[..., None] * np.random.normal(0, 1, voxel_grids.shape)
 
     return {
         "voxel_grids": voxel_grids,
@@ -233,6 +203,5 @@ def generate_voxel_grids(X, Y, T, K, lambda_=0.1, mu=5.0, tr=1.5, a1=6, a2=16,
         "signals": signals,
         "W": W,
         "all_origins": all_origins,
-        "weight_moments": moments,
-        "individual_coords": individual_coords,
+        "noise_var": noise_var,
     }

@@ -49,6 +49,7 @@ def clean(x, tr=1.5, run_lengths=None, cutoff_s=128.0, standardize=True,
     x           : (units, T).
     run_lengths : lengths of the concatenated runs, summing to T. Setting this
                   removes the step at each run boundary. Defaults to one run.
+    cutoff_s    : high-pass cutoff in seconds. None removes only the mean.
     confounds   : (T, p) nuisance regressors, or None.
     """
     x = np.atleast_2d(np.asarray(x, dtype=float))
@@ -69,7 +70,11 @@ def clean(x, tr=1.5, run_lengths=None, cutoff_s=128.0, standardize=True,
             Q_confounds, _ = np.linalg.qr(C - C.mean(0))
             segment = project_out(segment, Q_confounds)
 
-        segment = project_out(segment, dct_basis(run_length, tr=tr, cutoff_s=cutoff_s))
+        if cutoff_s is None:
+            basis = dct_basis(run_length, K=0)
+        else:
+            basis = dct_basis(run_length, tr=tr, cutoff_s=cutoff_s)
+        segment = project_out(segment, basis)
 
         if standardize:
             sd = segment.std(-1, keepdims=True)
